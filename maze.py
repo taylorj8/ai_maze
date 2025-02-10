@@ -39,7 +39,7 @@ class Cell(object):
         """
         return len(self.walls) == 4
 
-    def _wall_to(self, other):
+    def wall_to(self, other):
         """
         Returns the direction to the given cell from the current one.
         Must be one cell away only.
@@ -60,8 +60,8 @@ class Cell(object):
         """
         Removes the wall between two adjacent cells.
         """
-        other.walls.remove(other._wall_to(self))
-        self.walls.remove(self._wall_to(other))
+        other.walls.remove(other.wall_to(self))
+        self.walls.remove(self.wall_to(other))
 
 class Maze(object):
     """
@@ -270,7 +270,6 @@ class MazeGame(object):
         self.moves = []
         self.player = self._get_random_position()
         self.target = self._get_random_position()
-        self.stack = None
 
     def _get_random_position(self):
         """
@@ -295,7 +294,7 @@ class MazeGame(object):
         """
 
         while self.player != self.target:
-            console.display(str(self.maze) + '\n\n' + str(self.stack))
+            console.display(str(self.maze))
             for cell in filter(lambda c: c.visited, self.maze.cells):
                 self._display(cell.xy(), 'x')
             self._display(self.player, '@')
@@ -308,6 +307,8 @@ class MazeGame(object):
                 self.player = (x, y)
             elif direction not in current_cell:
                 self.player = (self.player[0] + x, self.player[1] + y)
+
+        self.replay()
 
         moves_str = ", ".join([f"({x}, {y})" for x, y in self.moves])
         console.display('You won in {} moves!'.format(len(self.moves)) + "\n" + moves_str)
@@ -323,6 +324,10 @@ class MazeGame(object):
         self.moves.append(key)
         return move_options[key]
 
+    # don't need to replay when playing interactively
+    def replay(self):
+        pass
+
 
 class DFSSolver(MazeGame):
 
@@ -330,32 +335,131 @@ class DFSSolver(MazeGame):
         super(DFSSolver, self).__init__(maze)
         self.stack = []
 
-    # override the choose move method
     def choose_move(self):
+        console.set_display(self.maze.height*2+1, 0, "Stack: {}".format([cell.xy() for cell in self.stack]))
+
+        # initialise the stack with the start cell if empty
         if not self.stack:
-            self.stack.append(self.maze[self.player])
+            start_cell = self.maze[self.player]
+            self.stack.append(start_cell)
+
+        # delay for visualisation purposes
         time.sleep(0.1)
 
+        # current cell is the one at the top of the stack.
         current = self.stack[-1]
-        self.maze[current.xy()].visited = True
 
-        neighbours = [n for n in self.maze.neighbors(self.maze[current.xy()]) if not n.visited]
+        # mark the current cell as visited.
+        current.visited = True
+
+        # if the current cell is the target, we're done
+        if current.xy() == self.target:
+            return 'teleport', current.x, current.y
+
+        # filter neighbors to include only those:
+        #   1. that have not yet been visited
+        #   2. that are accessible (i.e. the wall between current and neighbor is absent)
+        neighbours = [
+            n for n in self.maze.neighbors(current)
+            if not n.visited and current.wall_to(n) not in current.walls
+        ]
 
         if neighbours:
-            next_cell = random.choice(neighbours)
+            # choose the first accessible neighbor
+            next_cell = neighbours[0]
             self.stack.append(next_cell)
-            self.moves.append((next_cell.x, next_cell.y))
             return 'teleport', next_cell.x, next_cell.y
-            # return self.maze[current]._wall_to(next_cell), next_cell.x - current[0], next_cell.y - current[1]
         else:
+            # backtrack if no accessible, unvisited neighbours are found
             self.stack.pop()
             if self.stack:
                 next_cell = self.stack[-1]
-                self.moves.append(next_cell.xy())
                 return 'teleport', next_cell.x, next_cell.y
-                # return self.maze[current]._wall_to(self.maze[next_cell]), next_cell[0] - current[0], next_cell[1] - current[1]
             else:
+                # no moves left: signal quit
                 return 'q', 0, 0
+
+    def replay(self):
+        # # Print the DFS solution path (i.e. the current stack)
+        # print("\nDFS Solution Path:")
+        # path_str = " -> ".join([f"({cell.x}, {cell.y})" for cell in self.stack])
+        # print(path_str)
+        self.moves = self.stack
+
+        for cell in self.stack:
+            time.sleep(0.1)
+            console.display(str(self.maze))
+            self._display(self.player, '@')
+            self._display(self.target, '$')
+            self.player = cell.xy()
+
+
+class BFSSolver(MazeGame):
+
+    def __init__(self, maze):
+        super(BFSSolver, self).__init__(maze)
+        self.queue = []
+        self.parent = {} # dictionary to map cells in the path to their parent - allows to reconstruct the path
+
+    # override the choose move method
+    def choose_move(self):
+        console.set_display(self.maze.height*2+1, 0, "Queue: {}".format([(cell.xy()) for cell in self.queue]))
+
+        # if the queue is empty, initialise it with the starting cell
+        if not self.queue:
+            start_cell = self.maze[self.player]
+            self.queue.append(start_cell)
+            self.parent[start_cell.xy()] = None  # starting cell has no parent
+
+        # delay for visualisation purposes
+        time.sleep(0.1)
+
+        # dequeue the first cell
+        current = self.queue.pop(0)
+        current.visited = True
+
+        # check if the current cell is the target
+        if current.xy() == self.target:
+            return 'teleport', current.x, current.y
+
+        # get all neighbors that:
+        #   1. have not been visited
+        #   2. are accessible (i.e. the wall between current and neighbor is removed)
+        accessible_neighbours = [
+            n for n in self.maze.neighbors(current)
+            if not n.visited and current.wall_to(n) not in current.walls
+        ]
+
+        # enqueue all accessible neighbors
+        for neighbor in accessible_neighbours:
+            if neighbor.xy() not in self.parent: # only enqueue if not already in the path
+                self.parent[neighbor.xy()] = current.xy()
+                self.queue.append(neighbor)
+
+        # if there are still cells in the queue, continue with the next one
+        if self.queue:
+            next_cell = self.queue[0]
+            return 'teleport', next_cell.x, next_cell.y
+        else:
+            # no more moves available - something went wrong
+            return 'q', 0, 0
+
+    def replay(self):
+        # reconstruct the path from the target to the start
+        path = []
+        current = self.target
+        while current is not None:
+            path.append(current)
+            current = self.parent.get(current)  # Get the parent of the current cell.
+        path.reverse()  # Now path is from start to target.
+        self.moves = path
+
+        for cell in path:
+            time.sleep(0.1)
+            console.display(str(self.maze))
+            self._display(self.player, '@')
+            self._display(self.target, '$')
+            self.player = cell
 
 
 if __name__ == '__main__':
@@ -372,7 +476,7 @@ if __name__ == '__main__':
 
     import console
     try:
-        while DFSSolver(Maze.generate(width, height)).play(): pass
+        while BFSSolver(Maze.generate(width, height)).play(): pass
     except:
         import traceback
         traceback.print_exc(file=open('error_log.txt', 'a'))
