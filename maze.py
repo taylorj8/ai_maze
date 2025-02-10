@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 import random
+import time
 
 # Easy to read representation for each cardinal direction.
 N, S, W, E = ('n', 's', 'w', 'e')
+move_options = {'up': (N, 0, -1),
+                'down': (S, 0, 1),
+                'left': (W, -1, 0),
+                'right': (E, 1, 0)}
+
+not_wall = [' ', '.', 'x']
 
 class Cell(object):
     """
@@ -13,14 +20,18 @@ class Cell(object):
         self.x = x
         self.y = y
         self.walls = set(walls)
+        self.visited = False
 
     def __repr__(self):
         # <15, 25 (es  )>
-        return '<{}, {} ({:4})>'.format(self.x, self.y, ''.join(sorted(self.walls)))
+        return '({}, {})'.format(self.x, self.y)
 
     def __contains__(self, item):
         # N in cell
         return item in self.walls
+
+    def xy(self):
+        return self.x, self.y
 
     def is_full(self):
         """
@@ -248,7 +259,7 @@ class Maze(object):
         m = Maze(width, height)
         m.randomize()
         return m
-                    
+
 
 class MazeGame(object):
     """
@@ -256,6 +267,10 @@ class MazeGame(object):
     """
     def __init__(self, maze):
         self.maze = maze or Maze.generate()
+        self.moves = []
+        self.player = self._get_random_position()
+        self.target = self._get_random_position()
+        self.stack = None
 
     def _get_random_position(self):
         """
@@ -278,31 +293,70 @@ class MazeGame(object):
         positions. Returns True if the user won, or False if she quit the game
         by pressing "q".
         """
-        player = self._get_random_position()
-        target = self._get_random_position()
 
-        while player != target:
-            console.display(str(self.maze))
-            self._display(player, '@')
-            self._display(target, '$')
+        while self.player != self.target:
+            console.display(str(self.maze) + '\n\n' + str(self.stack))
+            for cell in filter(lambda c: c.visited, self.maze.cells):
+                self._display(cell.xy(), 'x')
+            self._display(self.player, '@')
+            self._display(self.target, '$')
 
-            key = console.get_valid_key(['up', 'down', 'left', 'right', 'q'])
+            direction, x, y = self.choose_move()
 
-            if key == 'q':
-                return False
+            current_cell = self.maze[self.player]
+            if direction == 'teleport':
+                self.player = (x, y)
+            elif direction not in current_cell:
+                self.player = (self.player[0] + x, self.player[1] + y)
 
-            direction, difx, dify = {'up': (N, 0, -1),
-                                     'down': (S, 0, 1),
-                                     'left': (W, -1, 0),
-                                     'right': (E, 1, 0)}[key]
-
-            current_cell = self.maze[player]
-            if direction not in current_cell:
-                player = (player[0] + difx, player[1] + dify)
-
-        console.display('You win!')
+        moves_str = ", ".join([f"({x}, {y})" for x, y in self.moves])
+        console.display('You won in {} moves!'.format(len(self.moves)) + "\n" + moves_str)
         console.get_key()
         return True
+
+    def choose_move(self):
+        key = console.get_valid_key(['up', 'down', 'left', 'right', 'q'])
+
+        if key == 'q':
+            return False
+
+        self.moves.append(key)
+        return move_options[key]
+
+
+class DFSSolver(MazeGame):
+
+    def __init__(self, maze):
+        super(DFSSolver, self).__init__(maze)
+        self.stack = []
+
+    # override the choose move method
+    def choose_move(self):
+        if not self.stack:
+            self.stack.append(self.maze[self.player])
+        time.sleep(0.1)
+
+        current = self.stack[-1]
+        self.maze[current.xy()].visited = True
+
+        neighbours = [n for n in self.maze.neighbors(self.maze[current.xy()]) if not n.visited]
+
+        if neighbours:
+            next_cell = random.choice(neighbours)
+            self.stack.append(next_cell)
+            self.moves.append((next_cell.x, next_cell.y))
+            return 'teleport', next_cell.x, next_cell.y
+            # return self.maze[current]._wall_to(next_cell), next_cell.x - current[0], next_cell.y - current[1]
+        else:
+            self.stack.pop()
+            if self.stack:
+                next_cell = self.stack[-1]
+                self.moves.append(next_cell.xy())
+                return 'teleport', next_cell.x, next_cell.y
+                # return self.maze[current]._wall_to(self.maze[next_cell]), next_cell[0] - current[0], next_cell[1] - current[1]
+            else:
+                return 'q', 0, 0
+
 
 if __name__ == '__main__':
     import sys
@@ -318,7 +372,7 @@ if __name__ == '__main__':
 
     import console
     try:
-        while MazeGame(Maze.generate(width, height)).play(): pass
+        while DFSSolver(Maze.generate(width, height)).play(): pass
     except:
         import traceback
         traceback.print_exc(file=open('error_log.txt', 'a'))
