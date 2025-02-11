@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import random
 import time
+import heapq
+
 
 # Easy to read representation for each cardinal direction.
 N, S, W, E = ('n', 's', 'w', 'e')
@@ -29,6 +31,9 @@ class Cell(object):
     def __contains__(self, item):
         # N in cell
         return item in self.walls
+
+    def __lt__(self, other):
+        return (self.x, self.y) < (other.x, other.y)
 
     def xy(self):
         return self.x, self.y
@@ -270,6 +275,7 @@ class MazeGame(object):
         self.moves = []
         self.player = self._get_random_position()
         self.target = self._get_random_position()
+        self.move_counter = 0
 
     def _get_random_position(self):
         """
@@ -301,17 +307,18 @@ class MazeGame(object):
             self._display(self.target, '$')
 
             direction, x, y = self.choose_move()
+            self.move_counter += 1
 
             current_cell = self.maze[self.player]
-            if direction == 'teleport':
+            if direction == 'goto':
                 self.player = (x, y)
             elif direction not in current_cell:
                 self.player = (self.player[0] + x, self.player[1] + y)
 
         self.replay()
 
-        moves_str = ", ".join([f"({x}, {y})" for x, y in self.moves])
-        console.display('You won in {} moves!'.format(len(self.moves)) + "\n" + moves_str)
+        moves_str = ", ".join([f"({cell.x}, {cell.y})" for cell in self.moves])
+        console.display('You won in {} moves! Shortest path found was {} moves.'.format(self.move_counter, len(self.moves)) + "\n" + moves_str)
         console.get_key()
         return True
 
@@ -321,7 +328,7 @@ class MazeGame(object):
         if key == 'q':
             return False
 
-        self.moves.append(key)
+        # self.moves.append(key)
         return move_options[key]
 
     # don't need to replay when playing interactively
@@ -354,7 +361,7 @@ class DFSSolver(MazeGame):
 
         # if the current cell is the target, we're done
         if current.xy() == self.target:
-            return 'teleport', current.x, current.y
+            return 'goto', current.x, current.y
 
         # filter neighbors to include only those:
         #   1. that have not yet been visited
@@ -368,13 +375,13 @@ class DFSSolver(MazeGame):
             # choose the first accessible neighbor
             next_cell = neighbours[0]
             self.stack.append(next_cell)
-            return 'teleport', next_cell.x, next_cell.y
+            return 'goto', next_cell.x, next_cell.y
         else:
             # backtrack if no accessible, unvisited neighbours are found
             self.stack.pop()
             if self.stack:
                 next_cell = self.stack[-1]
-                return 'teleport', next_cell.x, next_cell.y
+                return 'goto', next_cell.x, next_cell.y
             else:
                 # no moves left: signal quit
                 return 'q', 0, 0
@@ -409,7 +416,7 @@ class BFSSolver(MazeGame):
         if not self.queue:
             start_cell = self.maze[self.player]
             self.queue.append(start_cell)
-            self.parent[start_cell.xy()] = None  # starting cell has no parent
+            self.parent[start_cell] = None  # starting cell has no parent
 
         # delay for visualisation purposes
         time.sleep(0.1)
@@ -420,7 +427,7 @@ class BFSSolver(MazeGame):
 
         # check if the current cell is the target
         if current.xy() == self.target:
-            return 'teleport', current.x, current.y
+            return 'goto', current.x, current.y
 
         # get all neighbors that:
         #   1. have not been visited
@@ -433,13 +440,13 @@ class BFSSolver(MazeGame):
         # enqueue all accessible neighbors
         for neighbor in accessible_neighbours:
             if neighbor.xy() not in self.parent: # only enqueue if not already in the path
-                self.parent[neighbor.xy()] = current.xy()
+                self.parent[neighbor] = current
                 self.queue.append(neighbor)
 
         # if there are still cells in the queue, continue with the next one
         if self.queue:
             next_cell = self.queue[0]
-            return 'teleport', next_cell.x, next_cell.y
+            return 'goto', next_cell.x, next_cell.y
         else:
             # no more moves available - something went wrong
             return 'q', 0, 0
@@ -462,6 +469,97 @@ class BFSSolver(MazeGame):
             self.player = cell
 
 
+class AStarSolver(MazeGame):
+    def __init__(self, maze):
+        super(AStarSolver, self).__init__(maze)
+        self.open_set = []    # Priority queue: each element is a tuple (f_score, counter, cell)
+        self.parent = {}      # Dictionary mapping a cell to its parent cell (for path reconstruction)
+        self.g_score = {}     # Dictionary mapping a cell to its cost from the start
+
+    def heuristic(self, cell, target):
+        """
+        Compute the Manhattan distance from the given cell to the target cell.
+        This serves as the heuristic (h) in A*.
+        """
+        return abs(cell.x - target.x) + abs(cell.y - target.y)
+
+    def choose_move(self):
+        console.set_display(
+            self.maze.height*2+1, 0,
+            "Open Set: {}".format([cell.xy() for _, cell in self.open_set])
+        )
+
+        # if the open set is empty, initialize it with the starting cell
+        if not self.open_set:
+            start_cell = self.maze[self.player]
+            self.g_score[start_cell] = 0  # Cost from start to start is 0.
+            target_cell = self.maze[self.target]
+            f_score = self.g_score[start_cell] + self.heuristic(start_cell, target_cell)
+            heapq.heappush(self.open_set, (f_score, start_cell))
+            self.parent[start_cell] = None  # Starting cell has no parent.
+
+        # delay for visualization purposes
+        time.sleep(0.1)
+
+        # pop the cell with the lowest f_score from the open set
+        f_current, current = heapq.heappop(self.open_set)
+        current.visited = True
+
+        # if the current cell is the target, we're done
+        if current.xy() == self.target:
+            return 'goto', current.x, current.y
+
+        target_cell = self.maze[self.target]
+        # process each neighbour of the current cell
+        for neighbour in self.maze.neighbors(current):
+            # skip the neighbour if it has been visited or a wall blocks the connection
+            if neighbour.visited or current.wall_to(neighbour) in current.walls:
+                continue
+
+            # assume the cost between adjacent cells is 1
+            tentative_g = self.g_score[current] + 1
+
+            # if the neighbor hasn't been discovered or we found a better path to it...
+            if neighbour not in self.g_score or tentative_g < self.g_score[neighbour]:
+                self.parent[neighbour] = current
+                self.g_score[neighbour] = tentative_g
+                f_score = tentative_g + self.heuristic(neighbour, target_cell)
+                # push the neighbour with its f_score and a counter as a tie-breaker
+                heapq.heappush(self.open_set, (f_score, neighbour))
+
+        # if there are still cells in the open set, set the next move
+        if self.open_set:
+            next_cell = self.open_set[0][1]  # peek at the cell with the lowest f_score.
+            return 'goto', next_cell.x, next_cell.y
+        else:
+            # no more moves available
+            return 'q', 0, 0
+
+    def replay(self):
+        """
+        Reconstruct and replay the found path from the target back to the start.
+        The path is built by following parent pointers and then reversed to display
+        the sequence from the starting cell to the target.
+        """
+        target_cell = self.maze[self.target]
+        path = []
+        current = target_cell
+        while current is not None:
+            path.append(current)
+            current = self.parent.get(current)  # get the parent of the current cell
+        path.reverse()  # now the path is in order from start to target
+        self.moves = path
+
+        # replay the path, updating the display for each cell
+        for cell in path:
+            time.sleep(0.1)
+            console.display(str(self.maze))
+            self._display(self.player, '@')
+            self._display(self.target, '$')
+            # update the player's position to the current cell in the path
+            self.player = cell.xy()
+
+
 if __name__ == '__main__':
     import sys
     if len(sys.argv) > 1:
@@ -476,7 +574,7 @@ if __name__ == '__main__':
 
     import console
     try:
-        while BFSSolver(Maze.generate(width, height)).play(): pass
+        while AStarSolver(Maze.generate(width, height)).play(): pass
     except:
         import traceback
         traceback.print_exc(file=open('error_log.txt', 'a'))
