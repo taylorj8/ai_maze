@@ -2,6 +2,7 @@
 import random
 import time
 import heapq
+import math
 
 
 # Easy to read representation for each cardinal direction.
@@ -110,6 +111,10 @@ class Maze(object):
             return self.cells[x + y * self.width]
         else:
             return None
+
+    def reset(self):
+        for cell in self.cells:
+            cell.visited = False
 
     def neighbors(self, cell):
         """
@@ -265,24 +270,41 @@ class Maze(object):
         m.randomize()
         return m
 
+    def get_random_position(self):
+        """
+        Returns a random position on the maze.
+        """
+        return random.choice(self.cells).xy()
+
 
 class MazeGame(object):
     """
     Class for interactively playing random maze games.
     """
-    def __init__(self, maze):
-        self.maze = maze or Maze.generate()
+    def __init__(self, maze=None, state='vis', vis_time=0.05):
+        self.maze = maze
         self.moves = []
+        self.player = None
+        self.target = None
+        self.vis_time = vis_time
+        self.state = state # decides whether to delay, wait for keypress or not wait at all
+        self.move_counter = 0
+
+    def generate_maze(self, width, height):
+        self.maze = Maze.generate(width, height)
         self.player = self._get_random_position()
         self.target = self._get_random_position()
-        self.move_counter = 0
+
+    def set_maze(self, maze, player, target):
+        self.maze = maze
+        self.player = player
+        self.target = target
 
     def _get_random_position(self):
         """
         Returns a random position on the maze.
         """
-        return (random.randrange(0, self.maze.width),
-                random.randrange(0, self.maze.height))
+        return self.maze.get_random_position()
 
     def _display(self, pos, value):
         """
@@ -299,12 +321,16 @@ class MazeGame(object):
         by pressing "q".
         """
 
+        if self.maze is None:
+            self.maze = Maze.generate(20, 10)
+
         while self.player != self.target:
-            console.display(str(self.maze))
-            for cell in filter(lambda c: c.visited, self.maze.cells):
-                self._display(cell.xy(), 'x')
-            self._display(self.player, '@')
-            self._display(self.target, '$')
+            if self.state != 'benchmark':
+                console.display(str(self.maze))
+                for cell in filter(lambda c: c.visited, self.maze.cells):
+                    self._display(cell.xy(), 'x')
+                self._display(self.player, '@')
+                self._display(self.target, '$')
 
             direction, x, y = self.choose_move()
             self.move_counter += 1
@@ -320,7 +346,8 @@ class MazeGame(object):
         moves_str = ", ".join([f"({cell.x}, {cell.y})" for cell in self.moves])
         console.display('You won in {} moves! Shortest path found was {} moves.'.format(self.move_counter, len(self.moves)) + "\n" + moves_str)
         console.get_key()
-        return True
+        maze.reset()
+        return False
 
     def choose_move(self):
         key = console.get_valid_key(['up', 'down', 'left', 'right', 'q'])
@@ -335,11 +362,21 @@ class MazeGame(object):
     def replay(self):
         pass
 
+    def wait(self):
+        # delay for visualisation purposes or wait for key press
+        match self.state:
+            case 'vis':
+                time.sleep(self.vis_time)
+            case 'key':
+                console.get_key()
+            case 'benchmark':
+                pass
+
 
 class DFSSolver(MazeGame):
 
-    def __init__(self, maze):
-        super(DFSSolver, self).__init__(maze)
+    def __init__(self, maze=None, state='vis', vis_time=0.05):
+        super(DFSSolver, self).__init__(maze, state, vis_time)
         self.stack = []
 
     def choose_move(self):
@@ -350,8 +387,8 @@ class DFSSolver(MazeGame):
             start_cell = self.maze[self.player]
             self.stack.append(start_cell)
 
-        # delay for visualisation purposes
-        time.sleep(0.1)
+        # delay for visualisation purposes or wait for key press
+        self.wait()
 
         # current cell is the one at the top of the stack.
         current = self.stack[-1]
@@ -387,14 +424,11 @@ class DFSSolver(MazeGame):
                 return 'q', 0, 0
 
     def replay(self):
-        # # Print the DFS solution path (i.e. the current stack)
-        # print("\nDFS Solution Path:")
-        # path_str = " -> ".join([f"({cell.x}, {cell.y})" for cell in self.stack])
-        # print(path_str)
+        # Print the DFS solution path (i.e. the current stack)
         self.moves = self.stack
 
         for cell in self.stack:
-            time.sleep(0.1)
+            time.sleep(self.vis_time)
             console.display(str(self.maze))
             self._display(self.player, '@')
             self._display(self.target, '$')
@@ -403,8 +437,8 @@ class DFSSolver(MazeGame):
 
 class BFSSolver(MazeGame):
 
-    def __init__(self, maze):
-        super(BFSSolver, self).__init__(maze)
+    def __init__(self, maze=None, state='vis', vis_time=0.05):
+        super(BFSSolver, self).__init__(maze, state, vis_time)
         self.queue = []
         self.parent = {} # dictionary to map cells in the path to their parent - allows to reconstruct the path
 
@@ -418,8 +452,8 @@ class BFSSolver(MazeGame):
             self.queue.append(start_cell)
             self.parent[start_cell] = None  # starting cell has no parent
 
-        # delay for visualisation purposes
-        time.sleep(0.1)
+        # delay for visualisation purposes or wait for key press
+        self.wait()
 
         # dequeue the first cell
         current = self.queue.pop(0)
@@ -431,17 +465,17 @@ class BFSSolver(MazeGame):
 
         # get all neighbors that:
         #   1. have not been visited
-        #   2. are accessible (i.e. the wall between current and neighbor is removed)
+        #   2. are accessible (i.e. the wall between current and neighbour is removed)
         accessible_neighbours = [
             n for n in self.maze.neighbors(current)
             if not n.visited and current.wall_to(n) not in current.walls
         ]
 
         # enqueue all accessible neighbors
-        for neighbor in accessible_neighbours:
-            if neighbor.xy() not in self.parent: # only enqueue if not already in the path
-                self.parent[neighbor] = current
-                self.queue.append(neighbor)
+        for neighbour in accessible_neighbours:
+            if neighbour.xy() not in self.parent: # only enqueue if not already in the path
+                self.parent[neighbour] = current
+                self.queue.append(neighbour)
 
         # if there are still cells in the queue, continue with the next one
         if self.queue:
@@ -454,7 +488,7 @@ class BFSSolver(MazeGame):
     def replay(self):
         # reconstruct the path from the target to the start
         path = []
-        current = self.target
+        current = self.maze[self.target]
         while current is not None:
             path.append(current)
             current = self.parent.get(current)  # Get the parent of the current cell.
@@ -462,17 +496,17 @@ class BFSSolver(MazeGame):
         self.moves = path
 
         for cell in path:
-            time.sleep(0.1)
+            time.sleep(self.vis_time)
             console.display(str(self.maze))
             self._display(self.player, '@')
             self._display(self.target, '$')
-            self.player = cell
+            self.player = cell.xy()
 
 
 class AStarSolver(MazeGame):
-    def __init__(self, maze):
-        super(AStarSolver, self).__init__(maze)
-        self.open_set = []    # Priority queue: each element is a tuple (f_score, counter, cell)
+    def __init__(self, maze=None, state='vis', vis_time=0.05):
+        super(AStarSolver, self).__init__(maze, state, vis_time)
+        self.open_set = []    # Priority queue: each element is a tuple (f_score cell)
         self.parent = {}      # Dictionary mapping a cell to its parent cell (for path reconstruction)
         self.g_score = {}     # Dictionary mapping a cell to its cost from the start
 
@@ -492,14 +526,14 @@ class AStarSolver(MazeGame):
         # if the open set is empty, initialize it with the starting cell
         if not self.open_set:
             start_cell = self.maze[self.player]
-            self.g_score[start_cell] = 0  # Cost from start to start is 0.
+            self.g_score[start_cell] = 0
             target_cell = self.maze[self.target]
             f_score = self.g_score[start_cell] + self.heuristic(start_cell, target_cell)
             heapq.heappush(self.open_set, (f_score, start_cell))
-            self.parent[start_cell] = None  # Starting cell has no parent.
+            self.parent[start_cell] = None
 
-        # delay for visualization purposes
-        time.sleep(0.1)
+        # delay for visualisation purposes or wait for key press
+        self.wait()
 
         # pop the cell with the lowest f_score from the open set
         f_current, current = heapq.heappop(self.open_set)
@@ -552,7 +586,7 @@ class AStarSolver(MazeGame):
 
         # replay the path, updating the display for each cell
         for cell in path:
-            time.sleep(0.1)
+            time.sleep(self.vis_time)
             console.display(str(self.maze))
             self._display(self.player, '@')
             self._display(self.target, '$')
@@ -560,21 +594,270 @@ class AStarSolver(MazeGame):
             self.player = cell.xy()
 
 
+class MDPValueIterationSolver(MazeGame):
+    """
+    Maze solver that uses Markov Decision Process (MDP) value iteration to
+    precompute an optimal policy from every cell to the target.
+    """
+
+    def __init__(self, maze=None, state='vis', vis_time=0.05):
+        super(MDPValueIterationSolver, self).__init__(maze, state, vis_time)
+        self.V = {} # dictionary mapping each cell to its cost-to-go (V)
+        self.policy = {} # dictionary mapping each cell to its best action (one of: 'up', 'down', 'left', 'right')
+
+    def compute_policy(self):
+        """
+        Run value iteration over all maze cells to compute the optimal cost-to-go
+        (V) and a corresponding policy that indicates the best move from each cell.
+        Each allowed move has a cost of 1. The target cell has V = 0.
+        """
+        # initialize the value function: set every cell’s cost to infinity
+        # except for the target cell
+        self.V = {cell: math.inf for cell in self.maze.cells}
+        target_cell = self.maze[self.target]
+        self.V[target_cell] = 0
+
+        # value iteration loop: update V(s) for all cells until values converge
+        converged = False
+        while not converged:
+            converged = True  # assume convergence; will be set to False if any update occurs
+            # iterate over all cells in the maze
+            for cell in self.maze.cells:
+                # the target is our terminal state
+                if cell == target_cell:
+                    continue
+
+                best_value = math.inf
+                best_action = None
+
+                # try every possible action from this cell
+                for action, (_, dx, dy) in move_options.items():
+                    nx = cell.x + dx
+                    ny = cell.y + dy
+                    # check that the neighbour coordinate is within the maze bounds
+                    if not (0 <= nx < self.maze.width and 0 <= ny < self.maze.height):
+                        continue
+                    neighbour = self.maze[(nx, ny)]
+                    # check if a wall blocks the move from cell to neighbour
+                    if cell.wall_to(neighbour) in cell.walls:
+                        continue
+
+                    # the cost to move is 1 plus the cost-to-go from the neighbour
+                    candidate_value = 1 + self.V[neighbour]
+                    if candidate_value < best_value:
+                        best_value = candidate_value
+                        best_action = action
+
+                # if we found a better value than the current one, update it
+                if abs(self.V[cell] - best_value) > 1e-6:
+                    self.V[cell] = best_value
+                    self.policy[cell] = best_action
+                    converged = False
+
+
+    def choose_move(self):
+        """
+        Instead of waiting for user key input, this solver looks up the
+        optimal action from the precomputed policy for the player's current
+        position and returns the corresponding move.
+        """
+        current_cell = self.maze[self.player]
+
+        # delay for visualisation purposes or wait for key press
+        self.wait()
+
+        # if we have reached the target, return a 'goto' command
+        if self.player == self.target:
+            return 'goto', current_cell.x, current_cell.y
+
+        # retrieve the optimal action from the policy
+        action = self.policy.get(current_cell)
+        if action is None:
+            return 'q', 0, 0
+
+        # return the move tuple
+        return move_options[action]
+
+
+class MDPPolicyIterationSolver(MazeGame):
+    """
+    Maze solver that uses Policy Iteration to precompute an optimal policy.
+
+    Policy Iteration consists of two main steps:
+      1. Policy Evaluation: Given a policy, compute the cost-to-go (value function)
+         for every state.
+      2. Policy Improvement: Update the policy by choosing at each state the action
+         that minimizes the cost (i.e. yields the lowest value).
+
+    These two steps are repeated until no change is made to the policy.
+    """
+
+    def __init__(self, maze=None, state='vis', vis_time=0.05):
+        super(MDPPolicyIterationSolver, self).__init__(maze, state, vis_time)
+        self.policy = {}
+        self.V = {}
+
+    def compute_policy(self):
+        """
+        Compute the optimal policy using Policy Iteration.
+        In our maze, every allowed move costs 1, and the target cell (goal)
+        is a terminal state with cost 0.
+        """
+        target_cell = self.maze[self.target]
+
+        # initialize an arbitrary policy
+        for cell in self.maze.cells:
+            if cell == target_cell:
+                continue  # terminal state - no action needed
+
+            valid_actions = []
+            for action, (_, dx, dy) in move_options.items():
+                nx, ny = cell.x + dx, cell.y + dy
+                if not (0 <= nx < self.maze.width and 0 <= ny < self.maze.height):
+                    continue
+                neighbour = self.maze[(nx, ny)]
+                # check for a wall blocking the move
+                if cell.wall_to(neighbour) in cell.walls:
+                    continue
+                valid_actions.append(action)
+            # choose a random valid action if available - otherwise, mark with None
+            self.policy[cell] = random.choice(valid_actions) if valid_actions else None
+
+        # initialize the value function: cost-to-go from each cell
+        self.V = {cell: math.inf for cell in self.maze.cells}
+        self.V[target_cell] = 0
+
+        # convergence threshold for value function updates
+        theta = 1e-6
+
+        # main loop - Policy Evaluation then Policy Improvement
+        policy_stable = False
+        while not policy_stable:
+            # --- Policy Evaluation ---
+            # for the current policy, compute V(s) for every state
+            while True:
+                delta = 0
+                for cell in self.maze.cells:
+                    if cell == target_cell:
+                        continue
+                    # if no valid action exists for this cell, skip it
+                    if self.policy.get(cell) is None:
+                        continue
+                    action = self.policy[cell]
+                    _, dx, dy = move_options[action]
+                    nx, ny = cell.x + dx, cell.y + dy
+                    # make sure the neighbour exists and is reachable
+                    if not (0 <= nx < self.maze.width and 0 <= ny < self.maze.height):
+                        continue
+                    neighbour = self.maze[(nx, ny)]
+                    # Since every move costs 1, the new value is:
+                    new_value = 1 + self.V[neighbour]
+                    delta = max(delta, abs(self.V[cell] - new_value))
+                    self.V[cell] = new_value
+                if delta < theta:
+                    break
+
+            # --- Policy Improvement ---
+            policy_stable = True  # assume the policy is stable unless a change is made
+            for cell in self.maze.cells:
+                if cell == target_cell:
+                    continue
+                old_action = self.policy.get(cell)
+                best_action = old_action
+                best_value = math.inf
+                for action, (_, dx, dy) in move_options.items():
+                    nx, ny = cell.x + dx, cell.y + dy
+                    if not (0 <= nx < self.maze.width and 0 <= ny < self.maze.height):
+                        continue
+                    neighbour = self.maze[(nx, ny)]
+                    # skip if a wall blocks the move
+                    if cell.wall_to(neighbour) in cell.walls:
+                        continue
+                    candidate_value = 1 + self.V[neighbour]
+                    if candidate_value < best_value:
+                        best_value = candidate_value
+                        best_action = action
+                # update the policy if a better action is found
+                if best_action != old_action:
+                    self.policy[cell] = best_action
+                    policy_stable = False
+
+            # if the policy changed, we need to re-evaluate the updated policy
+            if not policy_stable:
+                # reinitialise the value function before re-evaluation
+                self.V = {cell: math.inf for cell in self.maze.cells}
+                self.V[target_cell] = 0
+
+
+    def choose_move(self):
+        """
+        Uses the precomputed optimal policy to choose the next move.
+        Returns a move command for the MazeGame (or quits if no valid move exists).
+        """
+        current_cell = self.maze[self.player]
+        if self.player == self.target:
+            return 'goto', current_cell.x, current_cell.y
+
+        # delay for visualisation purposes or wait for key press
+        self.wait()
+
+        action = self.policy.get(current_cell)
+        if action is None:
+            return 'q', 0, 0
+        return move_options[action]
+
+
 if __name__ == '__main__':
     import sys
     if len(sys.argv) > 1:
-        width = int(sys.argv[1])
+        match sys.argv[1]:
+            case 'dfs':
+                solvers = [DFSSolver()]
+            case 'bfs':
+                solvers = [BFSSolver()]
+            case 'astar':
+                solvers = [AStarSolver()]
+            case 'mdp-i':
+                solvers = [MDPValueIterationSolver()]
+            case 'mdp-p':
+                solvers = [MDPPolicyIterationSolver()]
+            case 'all':
+                solvers = [
+                    DFSSolver(),
+                    BFSSolver(),
+                    AStarSolver(),
+                    MDPPolicyIterationSolver(),
+                    MDPValueIterationSolver()
+                ]
+            case _:
+                solvers = [DFSSolver()]
         if len(sys.argv) > 2:
-            height = int(sys.argv[2])
+            width = int(sys.argv[2])
+            if len(sys.argv) > 3:
+                height = int(sys.argv[3])
+            else:
+                height = width
         else:
-            height = width
-    else:
+            width = 20
+            height = 10
+    else :
+        solvers = [DFSSolver()]
         width = 20
         height = 10
 
+    # give all solvers the same maze
+    maze = Maze.generate(width, height)
+    player = maze.get_random_position()
+    target = maze.get_random_position()
+    for solver in solvers:
+        solver.set_maze(maze, player, target)
+        if isinstance(solver, MDPValueIterationSolver) or isinstance(solver, MDPPolicyIterationSolver):
+            solver.compute_policy()
+
     import console
     try:
-        while AStarSolver(Maze.generate(width, height)).play(): pass
+        for solver in solvers:
+            while solver.play(): pass
     except:
         import traceback
         traceback.print_exc(file=open('error_log.txt', 'a'))
