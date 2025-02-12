@@ -809,39 +809,47 @@ class MDPPolicyIterationSolver(MazeGame):
 
 if __name__ == '__main__':
     import sys
+    solvers = []
     if len(sys.argv) > 1:
-        match sys.argv[1]:
-            case 'dfs':
-                solvers = [DFSSolver()]
-            case 'bfs':
-                solvers = [BFSSolver()]
-            case 'astar':
-                solvers = [AStarSolver()]
-            case 'mdp-i':
-                solvers = [MDPValueIterationSolver()]
-            case 'mdp-p':
-                solvers = [MDPPolicyIterationSolver()]
-            case 'all':
-                solvers = [
-                    DFSSolver(),
-                    BFSSolver(),
-                    AStarSolver(),
-                    MDPPolicyIterationSolver(),
-                    MDPValueIterationSolver()
-                ]
-            case _:
-                solvers = [DFSSolver()]
-        if len(sys.argv) > 2:
-            width = int(sys.argv[2])
-            if len(sys.argv) > 3:
-                height = int(sys.argv[3])
+        args = sys.argv[1:]
+        try:
+            if '-w' in args:
+                width = int(args[args.index('-w') + 1])
             else:
-                height = width
-        else:
-            width = 20
-            height = 10
-    else :
-        solvers = [DFSSolver()]
+                width = 20
+            if '-h' in args:
+                height = int(args[args.index('-h') + 1])
+            else:
+                height = 10
+            if '-s' in args:
+                solver_map = {
+                    'dfs': DFSSolver(),
+                    'bfs': BFSSolver(),
+                    'astar': AStarSolver(),
+                    'mdpi': MDPValueIterationSolver(),
+                    'mdpp': MDPPolicyIterationSolver()
+                }
+                for arg in args[args.index('-s') + 1:]:
+                    if arg == "all":
+                        solvers = list(solver_map.values())
+                        break
+                    elif arg.startswith('-'):
+                        break
+                    elif arg in solver_map:
+                        solvers.append(solver_map[arg])
+            else:
+                solvers.append(DFSSolver())
+            if '-i' in args:
+                for solver in solvers:
+                    solver.state = 'key'
+            elif '-b' in args:
+                for solver in solvers:
+                    solver.state = 'benchmark'
+        except:
+            print("Usage: python maze.py -w <width> -h <height> -s <solvers> -i/-b")
+            exit()
+    else:
+        solvers.append(DFSSolver())
         width = 20
         height = 10
 
@@ -862,3 +870,4 @@ if __name__ == '__main__':
         import traceback
         traceback.print_exc(file=open('error_log.txt', 'a'))
         
+# python maze.py -w 20 -h 10 -s "MDPValueIterationSolver" "MDPPolicyIterationSolver" "DFSSolver" "BFSSolver" "AStarSolver"
