@@ -250,6 +250,7 @@ class Maze(object):
         cell = random.choice(self.cells)
         n_visited_cells = 1
 
+        i = 0
         while n_visited_cells < len(self.cells):
             neighbors = [c for c in self.neighbors(cell) if c.is_full()]
             if len(neighbors):
@@ -289,6 +290,8 @@ class MazeGame(object):
         self.vis_time = vis_time
         self.mode = state # decides whether to delay, wait for keypress or not wait at all
         self.move_counter = 0
+        self.timer = None
+
 
     def generate_maze(self, width, height):
         self.maze = Maze.generate(width, height)
@@ -323,6 +326,11 @@ class MazeGame(object):
 
         if self.maze is None:
             self.maze = Maze.generate(20, 10)
+            
+        self.timer = time.time()
+
+        if self.mode == 'benchmark':
+            console.display("Benchmarking {}...".format(self.__class__.__name__))
 
         while self.player != self.target:
             if self.mode != 'benchmark':
@@ -343,8 +351,11 @@ class MazeGame(object):
 
         self.replay()
 
+        self.timer = time.time() - self.timer
+
         moves_str = ", ".join([f"({cell.x}, {cell.y})" for cell in self.moves])
-        console.display('You won in {} moves! Shortest path found was {} moves.'.format(self.move_counter, len(self.moves)) + "\n" + moves_str)
+        # console.display('Shortest path found was {} moves.'.format(self.move_counter, len(self.moves)) + "\n" + moves_str)
+        console.display('{} took {:.5f} seconds.'.format(self.__class__.__name__, self.timer))
         console.get_key()
         maze.reset()
         return False
@@ -655,6 +666,10 @@ class MDPValueIterationSolver(MazeGame):
         optimal action from the precomputed policy for the player's current
         position and returns the corresponding move.
         """
+        # if the policy hasn't been computed yet, do it now
+        if self.policy == {}:
+            self.compute_policy()
+
         current_cell = self.maze[self.player]
 
         # delay for visualisation purposes or wait for key press
@@ -788,6 +803,11 @@ class MDPPolicyIterationSolver(MazeGame):
         Uses the precomputed optimal policy to choose the next move.
         Returns a move command for the MazeGame (or quits if no valid move exists).
         """
+
+        # if the policy hasn't been computed yet, do it now
+        if self.policy == {}:
+            self.compute_policy()
+
         current_cell = self.maze[self.player]
         if self.player == self.target:
             return 'goto', current_cell.x, current_cell.y
@@ -853,8 +873,6 @@ if __name__ == '__main__':
     target = maze.get_random_position()
     for solver in solvers:
         solver.set_maze(maze, player, target)
-        if isinstance(solver, MDPValueIterationSolver) or isinstance(solver, MDPPolicyIterationSolver):
-            solver.compute_policy()
 
     import console
     try:
