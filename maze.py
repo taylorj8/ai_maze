@@ -287,7 +287,7 @@ class MazeGame(object):
         self.player = None
         self.target = None
         self.vis_time = vis_time
-        self.state = state # decides whether to delay, wait for keypress or not wait at all
+        self.mode = state # decides whether to delay, wait for keypress or not wait at all
         self.move_counter = 0
 
     def generate_maze(self, width, height):
@@ -325,7 +325,7 @@ class MazeGame(object):
             self.maze = Maze.generate(20, 10)
 
         while self.player != self.target:
-            if self.state != 'benchmark':
+            if self.mode != 'benchmark':
                 console.display(str(self.maze))
                 for cell in filter(lambda c: c.visited, self.maze.cells):
                     self._display(cell.xy(), 'x')
@@ -362,9 +362,18 @@ class MazeGame(object):
     def replay(self):
         pass
 
+    def replay_moves(self):
+        if self.mode != 'benchmark':
+            for cell in self.moves:
+                time.sleep(self.vis_time)
+                console.display(str(self.maze))
+                self._display(self.player, '@')
+                self._display(self.target, '$')
+                self.player = cell.xy()
+
     def wait(self):
         # delay for visualisation purposes or wait for key press
-        match self.state:
+        match self.mode:
             case 'vis':
                 time.sleep(self.vis_time)
             case 'key':
@@ -380,7 +389,8 @@ class DFSSolver(MazeGame):
         self.stack = []
 
     def choose_move(self):
-        console.set_display(self.maze.height*2+1, 0, "Stack: {}".format([cell.xy() for cell in self.stack]))
+        if self.mode != 'benchmark':
+            console.set_display(self.maze.height*2+1, 0, "Stack: {}".format([cell.xy() for cell in self.stack]))
 
         # initialise the stack with the start cell if empty
         if not self.stack:
@@ -426,13 +436,7 @@ class DFSSolver(MazeGame):
     def replay(self):
         # Print the DFS solution path (i.e. the current stack)
         self.moves = self.stack
-
-        for cell in self.stack:
-            time.sleep(self.vis_time)
-            console.display(str(self.maze))
-            self._display(self.player, '@')
-            self._display(self.target, '$')
-            self.player = cell.xy()
+        self.replay_moves()
 
 
 class BFSSolver(MazeGame):
@@ -444,7 +448,8 @@ class BFSSolver(MazeGame):
 
     # override the choose move method
     def choose_move(self):
-        console.set_display(self.maze.height*2+1, 0, "Queue: {}".format([(cell.xy()) for cell in self.queue]))
+        if self.mode != 'benchmark':
+            console.set_display(self.maze.height*2+1, 0, "Queue: {}".format([(cell.xy()) for cell in self.queue]))
 
         # if the queue is empty, initialise it with the starting cell
         if not self.queue:
@@ -495,12 +500,7 @@ class BFSSolver(MazeGame):
         path.reverse()  # Now path is from start to target.
         self.moves = path
 
-        for cell in path:
-            time.sleep(self.vis_time)
-            console.display(str(self.maze))
-            self._display(self.player, '@')
-            self._display(self.target, '$')
-            self.player = cell.xy()
+        self.replay_moves()
 
 
 class AStarSolver(MazeGame):
@@ -518,10 +518,11 @@ class AStarSolver(MazeGame):
         return abs(cell.x - target.x) + abs(cell.y - target.y)
 
     def choose_move(self):
-        console.set_display(
-            self.maze.height*2+1, 0,
-            "Open Set: {}".format([cell.xy() for _, cell in self.open_set])
-        )
+        if self.mode != 'benchmark':
+            console.set_display(
+                self.maze.height*2+1, 0,
+                "Open Set: {}".format([cell.xy() for _, cell in self.open_set])
+            )
 
         # if the open set is empty, initialize it with the starting cell
         if not self.open_set:
@@ -584,14 +585,7 @@ class AStarSolver(MazeGame):
         path.reverse()  # now the path is in order from start to target
         self.moves = path
 
-        # replay the path, updating the display for each cell
-        for cell in path:
-            time.sleep(self.vis_time)
-            console.display(str(self.maze))
-            self._display(self.player, '@')
-            self._display(self.target, '$')
-            # update the player's position to the current cell in the path
-            self.player = cell.xy()
+        self.replay_moves()
 
 
 class MDPValueIterationSolver(MazeGame):
@@ -841,10 +835,10 @@ if __name__ == '__main__':
                 solvers.append(DFSSolver())
             if '-i' in args:
                 for solver in solvers:
-                    solver.state = 'key'
+                    solver.mode = 'key'
             elif '-b' in args:
                 for solver in solvers:
-                    solver.state = 'benchmark'
+                    solver.mode = 'benchmark'
         except:
             print("Usage: python maze.py -w <width> -h <height> -s <solvers> -i/-b")
             exit()
