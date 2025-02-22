@@ -90,7 +90,8 @@ class Maze(object):
                               'sw': '┐',
                               's': '╷',
                               'n': '╵',
-                              'w': '╴'}
+                              'w': '╴',
+                              '': ' '}
 
     def __init__(self, width=20, height=10):
         """
@@ -117,7 +118,7 @@ class Maze(object):
         for cell in self.cells:
             cell.visited = False
 
-    def neighbors(self, cell):
+    def neighbours(self, cell):
         """
         Returns the list of neighboring cells, not counting diagonals. Cells on
         borders or corners may have less than 4 neighbors.
@@ -125,9 +126,9 @@ class Maze(object):
         x = cell.x
         y = cell.y
         for new_x, new_y in [(x, y - 1), (x, y + 1), (x - 1, y), (x + 1, y)]:
-            neighbor = self[new_x, new_y]
-            if neighbor is not None:
-                yield neighbor
+            neighbour = self[new_x, new_y]
+            if neighbour is not None:
+                yield neighbour
 
     def _to_str_matrix(self):
         """
@@ -236,7 +237,11 @@ class Maze(object):
                 str_connections = ''.join(sorted(connections))
                 # Note we are changing the matrix we are reading. We need to be
                 # careful as to not break the `g` function implementation.
-                matrix[y][x] = Maze.UNICODE_BY_CONNECTIONS[str_connections]
+                try:
+                    matrix[y][x] = Maze.UNICODE_BY_CONNECTIONS[str_connections]
+                except:
+                    console.display(f"Error at {x}, {y} with connections {str_connections}")
+                    console.get_key()
 
         # Simple double join to transform list of lists into string.
         return '\n'.join(''.join(line) for line in matrix) + '\n'
@@ -253,15 +258,26 @@ class Maze(object):
 
         i = 0
         while n_visited_cells < len(self.cells):
-            neighbors = [c for c in self.neighbors(cell) if c.is_full()]
-            if len(neighbors):
-                neighbor = random.choice(neighbors)
+            neighbours = [c for c in self.neighbours(cell) if c.is_full()]
+            if len(neighbours):
+                neighbor = random.choice(neighbours)
                 cell.connect(neighbor)
                 cell_stack.append(cell)
                 cell = neighbor
                 n_visited_cells += 1
             else:
                 cell = cell_stack.pop()
+
+
+    def remove_random_walls(self, n_walls):
+        # remove n_walls random walls to create a maze that has multiple paths to the target
+        random_cells = random.sample(self.cells, n_walls)
+        for cell in random_cells:
+            neighbours = [c for c in self.neighbours(cell) if cell.wall_to(c) in cell.walls]
+            if neighbours:
+                neighbour = random.choice(neighbours)
+                cell.connect(neighbour)
+
 
     @staticmethod
     def generate(width=20, height=10):
@@ -270,6 +286,7 @@ class Maze(object):
         """
         m = Maze(width, height)
         m.randomize()
+        m.remove_random_walls(width * height // 20) # remove an extra wall from 5% of the cells
         return m
 
     def get_random_position(self):
@@ -425,7 +442,7 @@ class DFSSolver(MazeGame):
         #   1. that have not yet been visited
         #   2. that are accessible (i.e. the wall between current and neighbor is absent)
         neighbours = [
-            n for n in self.maze.neighbors(current)
+            n for n in self.maze.neighbours(current)
             if not n.visited and current.wall_to(n) not in current.walls
         ]
 
@@ -483,7 +500,7 @@ class BFSSolver(MazeGame):
         #   1. have not been visited
         #   2. are accessible (i.e. the wall between current and neighbour is removed)
         accessible_neighbours = [
-            n for n in self.maze.neighbors(current)
+            n for n in self.maze.neighbours(current)
             if not n.visited and current.wall_to(n) not in current.walls
         ]
 
@@ -557,7 +574,7 @@ class AStarSolver(MazeGame):
 
         target_cell = self.maze[self.target]
         # process each neighbour of the current cell
-        for neighbour in self.maze.neighbors(current):
+        for neighbour in self.maze.neighbours(current):
             # skip the neighbour if it has been visited or a wall blocks the connection
             if neighbour.visited or current.wall_to(neighbour) in current.walls:
                 continue
@@ -701,7 +718,7 @@ class MDPPolicyIterationSolver(MazeGame):
     These two steps are repeated until no change is made to the policy.
     """
 
-    def __init__(self, maze=None, state='vis', vis_time=0.01):
+    def __init__(self, maze=None, state='vis', vis_time=0.5):
         super(MDPPolicyIterationSolver, self).__init__(maze, state, vis_time)
         self.policy = {}
         self.costs = {}
