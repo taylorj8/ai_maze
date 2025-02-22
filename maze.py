@@ -327,6 +327,19 @@ class MazeGame(object):
         """
         return self.maze.get_random_position()
 
+    def get_valid_actions(self, cell):
+        valid_actions = []
+        for action, (_, dx, dy) in move_options.items():
+            nx, ny = cell.x + dx, cell.y + dy
+            if not (0 <= nx < self.maze.width and 0 <= ny < self.maze.height):
+                continue
+            neighbour = self.maze[(nx, ny)]
+            # check for a wall blocking the move
+            if cell.wall_to(neighbour) in cell.walls:
+                continue
+            valid_actions.append(action)
+        return valid_actions
+
     def _display(self, pos, value):
         """
         Displays a value on the screen from an x and y maze positions.
@@ -622,59 +635,75 @@ class MDPValueIterationSolver(MazeGame):
     precompute an optimal policy from every cell to the target.
     """
 
-    def __init__(self, maze=None, state='vis', vis_time=0.05):
+    def __init__(self, maze=None, state='vis', vis_time=0.01):
         super(MDPValueIterationSolver, self).__init__(maze, state, vis_time)
-        self.V = {} # dictionary mapping each cell to its cost-to-go (V)
+        self.costs = {} # dictionary mapping each cell to its cost-to-go (V)
         self.policy = {} # dictionary mapping each cell to its best action (one of: 'up', 'down', 'left', 'right')
+
 
     def compute_policy(self):
         """
-        Run value iteration over all maze cells to compute the optimal cost-to-go
-        (V) and a corresponding policy that indicates the best move from each cell.
-        Each allowed move has a cost of 1. The target cell has V = 0.
+        Compute the optimal policy using Policy Iteration.
+        In our maze, every allowed move costs 1, and the target cell (goal)
+        is a terminal state with cost 0.
         """
-        # initialize the value function: set every cell’s cost to infinity
-        # except for the target cell
-        self.V = {cell: math.inf for cell in self.maze.cells}
         target_cell = self.maze[self.target]
-        self.V[target_cell] = 0
 
-        # value iteration loop: update V(s) for all cells until values converge
-        converged = False
-        while not converged:
-            converged = True  # assume convergence; will be set to False if any update occurs
-            # iterate over all cells in the maze
-            for cell in self.maze.cells:
-                # the target is our terminal state
-                if cell == target_cell:
-                    continue
+        self.initialise_policy()
 
-                best_value = math.inf
-                best_action = None
+        # initialize the value function: cost-to-go from each cell
+        self.costs = {cell: 1000 for cell in self.maze.cells}
+        self.costs[target_cell] = 0
 
-                # try every possible action from this cell
-                for action, (_, dx, dy) in move_options.items():
-                    nx = cell.x + dx
-                    ny = cell.y + dy
-                    # check that the neighbour coordinate is within the maze bounds
-                    if not (0 <= nx < self.maze.width and 0 <= ny < self.maze.height):
-                        continue
-                    neighbour = self.maze[(nx, ny)]
-                    # check if a wall blocks the move from cell to neighbour
-                    if cell.wall_to(neighbour) in cell.walls:
-                        continue
+        convergence_threshold = 0.001
 
-                    # the cost to move is 1 plus the cost-to-go from the neighbour
-                    candidate_value = 1 + self.V[neighbour]
-                    if candidate_value < best_value:
-                        best_value = candidate_value
-                        best_action = action
+        # main loop - Policy Evaluation then Policy Improvement
+        # run until the policy doesn't change, or the maximum number of epochs is reached
+        epoch = 0
+        delta = 1
+        while delta > convergence_threshold and epoch < 10000:
+            epoch += 1
+            delta = self.value_iteration()
+            console.display(f"Epoch {epoch}: highest delta = {delta}")
 
-                # if we found a better value than the current one, update it
-                if abs(self.V[cell] - best_value) > 1e-6:
-                    self.V[cell] = best_value
-                    self.policy[cell] = best_action
-                    converged = False
+
+    def initialise_policy(self):
+        # initialize an arbitrary policy
+        # randomly choose and action from the valid moves for each cell
+        for cell in self.maze.cells:
+            if cell == self.maze[self.target]:
+                continue  # terminal state - no action needed
+
+            valid_actions = self.get_valid_actions(cell)
+            # choose a random valid action if available - otherwise, mark with None
+            self.policy[cell] = random.choice(valid_actions) if valid_actions else None
+
+
+    def value_iteration(self):
+        delta = 0
+        for cell in self.maze.cells:
+            if cell == self.maze[self.target]:
+                continue
+
+            best_value = 1000
+            best_action = None
+
+            valid_actions = self.get_valid_actions(cell)
+            for action in valid_actions:
+                _, dx, dy = move_options[action]
+                neighbour = self.maze[(cell.x + dx, cell.y + dy)]
+
+                candidate_value = 1 + self.costs[neighbour]
+                if candidate_value < best_value:
+                    best_value = candidate_value
+                    best_action = action
+
+            if best_value < self.costs[cell]:
+                delta = max(delta, abs(self.costs[cell] - best_value))
+                self.costs[cell] = best_value
+                self.policy[cell] = best_action
+
+        return delta
 
 
     def choose_move(self):
@@ -718,7 +747,7 @@ class MDPPolicyIterationSolver(MazeGame):
     These two steps are repeated until no change is made to the policy.
     """
 
-    def __init__(self, maze=None, state='vis', vis_time=0.5):
+    def __init__(self, maze=None, state='vis', vis_time=0.01):
         super(MDPPolicyIterationSolver, self).__init__(maze, state, vis_time)
         self.policy = {}
         self.costs = {}
@@ -746,20 +775,6 @@ class MDPPolicyIterationSolver(MazeGame):
             self.evaluate_policy()
             actions_updated = self.improve_policy()
             console.display(f"Epoch {epoch}: Updated {actions_updated} actions.")
-
-
-    def get_valid_actions(self, cell):
-        valid_actions = []
-        for action, (_, dx, dy) in move_options.items():
-            nx, ny = cell.x + dx, cell.y + dy
-            if not (0 <= nx < self.maze.width and 0 <= ny < self.maze.height):
-                continue
-            neighbour = self.maze[(nx, ny)]
-            # check for a wall blocking the move
-            if cell.wall_to(neighbour) in cell.walls:
-                continue
-            valid_actions.append(action)
-        return valid_actions
 
 
     def initialise_policy(self):
