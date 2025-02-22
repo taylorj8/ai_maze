@@ -302,7 +302,7 @@ class MazeGame(object):
     """
     def __init__(self, maze=None, state='vis', vis_time=0.05):
         self.maze = maze
-        self.moves = []
+        self.path = []
         self.player = None
         self.target = None
         self.vis_time = vis_time
@@ -380,12 +380,13 @@ class MazeGame(object):
             elif direction not in current_cell:
                 self.player = (self.player[0] + x, self.player[1] + y)
 
-        self.replay()
         self.timer = time.time() - self.timer
+        self.replay()
 
-        moves_str = ", ".join([f"({cell.x}, {cell.y})" for cell in self.moves])
-        # console.display('Shortest path found was {} moves.'.format(self.move_counter, len(self.moves)) + "\n" + moves_str)
-        console.display('{} took {:.5f} seconds.'.format(self.__class__.__name__, self.timer))
+        moves_str = ", ".join([f"({cell.x}, {cell.y})" for cell in self.path])
+        console.display(f"{self.__class__.__name__} took {self.timer:.5f} seconds.\n"
+                        f"Shortest path found was {len(self.path) - 1} moves.\n"
+                        f"Total moves made: {self.move_counter}.\n" + moves_str)
         console.get_key()
         maze.reset()
         return self.timer
@@ -396,7 +397,7 @@ class MazeGame(object):
         if key == 'q':
             return False
 
-        # self.moves.append(key)
+        # self.path.append(key)
         return move_options[key]
 
     # don't need to replay when playing interactively
@@ -405,7 +406,7 @@ class MazeGame(object):
 
     def replay_moves(self):
         if self.mode != 'benchmark':
-            for cell in self.moves:
+            for cell in self.path:
                 time.sleep(self.vis_time)
                 console.display(str(self.maze))
                 self._display(self.player, '@')
@@ -476,12 +477,11 @@ class DFSSolver(MazeGame):
 
     def replay(self):
         # Print the DFS solution path (i.e. the current stack)
-        self.moves = self.stack
+        self.path = self.stack
         self.replay_moves()
 
 
 class BFSSolver(MazeGame):
-
     def __init__(self, maze=None, state='vis', vis_time=0.05):
         super(BFSSolver, self).__init__(maze, state, vis_time)
         self.queue = []
@@ -539,7 +539,7 @@ class BFSSolver(MazeGame):
             path.append(current)
             current = self.parent.get(current)  # Get the parent of the current cell.
         path.reverse()  # Now path is from start to target.
-        self.moves = path
+        self.path = path
 
         self.replay_moves()
 
@@ -624,7 +624,7 @@ class AStarSolver(MazeGame):
             path.append(current)
             current = self.parent.get(current)  # get the parent of the current cell
         path.reverse()  # now the path is in order from start to target
-        self.moves = path
+        self.path = path
 
         self.replay_moves()
 
@@ -717,13 +717,13 @@ class MDPValueIterationSolver(MazeGame):
             self.compute_policy()
 
         current_cell = self.maze[self.player]
-
-        # delay for visualisation purposes or wait for key press
-        self.wait()
+        self.path.append(current_cell)
 
         # if we have reached the target, return a 'goto' command
         if self.player == self.target:
             return 'goto', current_cell.x, current_cell.y
+        # delay for visualisation purposes or wait for key press
+        self.wait()
 
         # retrieve the optimal action from the policy
         action = self.policy.get(current_cell)
@@ -732,6 +732,11 @@ class MDPValueIterationSolver(MazeGame):
 
         # return the move tuple
         return move_options[action]
+
+
+    # append the target to the path for consistency with the search methods
+    def replay(self):
+        self.path.append(self.maze[self.target])
 
 
 class MDPPolicyIterationSolver(MazeGame):
@@ -846,6 +851,7 @@ class MDPPolicyIterationSolver(MazeGame):
             self.compute_policy()
 
         current_cell = self.maze[self.player]
+        self.path.append(current_cell)
         if self.player == self.target:
             return 'goto', current_cell.x, current_cell.y
 
@@ -856,6 +862,11 @@ class MDPPolicyIterationSolver(MazeGame):
         if action is None:
             return 'q', 0, 0
         return move_options[action]
+
+
+    # append the target to the path for consistency with the search methods
+    def replay(self):
+        self.path.append(self.maze[self.target])
 
 
 def append_to_csv(results, csv_file_path='results.csv'):
@@ -920,8 +931,10 @@ if __name__ == '__main__':
 
     # give all solvers the same maze
     maze = Maze.generate(width, height)
-    player = maze.get_random_position()
-    target = maze.get_random_position()
+    # player = maze.get_random_position()
+    # target = maze.get_random_position()
+    player = (0, 0)
+    target = (width - 1, height - 1)
     for solver in solvers:
         solver.set_maze(maze, player, target)
 
