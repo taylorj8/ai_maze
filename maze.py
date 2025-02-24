@@ -4,6 +4,7 @@ import time
 import heapq
 import math
 import csv
+import tracemalloc
 
 
 # Easy to read representation for each cardinal direction.
@@ -307,8 +308,9 @@ class MazeGame(object):
         self.target = None
         self.vis_time = vis_time
         self.mode = state # decides whether to delay, wait for keypress or not wait at all
-        self.move_counter = 0
         self.timer = None
+        self.peak_memory = None
+        self.move_counter = 0
 
 
     def generate_maze(self, width, height):
@@ -363,6 +365,7 @@ class MazeGame(object):
         if self.mode == 'benchmark':
             console.display("Benchmarking {}...".format(self.__class__.__name__))
 
+        tracemalloc.start()
         while self.player != self.target:
             if self.mode != 'benchmark':
                 console.display(str(self.maze))
@@ -379,14 +382,20 @@ class MazeGame(object):
                 self.player = (x, y)
             elif direction not in current_cell:
                 self.player = (self.player[0] + x, self.player[1] + y)
+        _, self.peak_memory = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
 
         self.timer = time.time() - self.timer
         self.replay()
 
-        moves_str = ", ".join([f"({cell.x}, {cell.y})" for cell in self.path])
+        if self.__class__.__name__.startswith('MDP'):
+            unique_metric = f"Total epochs: {self.epoch}\n"
+        else:
+            unique_metric = f"Unique cells visited: {len([cell for cell in self.maze.cells if cell.visited])}\n"
+        # moves_str = ", ".join([f"({cell.x}, {cell.y})" for cell in self.path])
         console.display(f"{self.__class__.__name__} took {self.timer:.5f} seconds.\n"
-                        f"Shortest path found was {len(self.path) - 1} moves.\n"
-                        f"Total moves made: {self.move_counter}.\n" + moves_str)
+                        f"Shortest path found was {len(self.path) - 1} moves.\n" + unique_metric +
+                        f"Peak memory usage: {self.peak_memory / 10**3:.3f} KB.")
         console.get_key()
         maze.reset()
         return self.timer
@@ -425,7 +434,6 @@ class MazeGame(object):
 
 
 class DFSSolver(MazeGame):
-
     def __init__(self, maze=None, state='vis', vis_time=0.05):
         super(DFSSolver, self).__init__(maze, state, vis_time)
         self.stack = []
@@ -639,6 +647,7 @@ class MDPValueIterationSolver(MazeGame):
         super(MDPValueIterationSolver, self).__init__(maze, state, vis_time)
         self.costs = {} # dictionary mapping each cell to its cost-to-go (V)
         self.policy = {} # dictionary mapping each cell to its best action (one of: 'up', 'down', 'left', 'right')
+        self.epoch = 0
 
 
     def compute_policy(self):
@@ -659,12 +668,11 @@ class MDPValueIterationSolver(MazeGame):
 
         # main loop - Policy Evaluation then Policy Improvement
         # run until the policy doesn't change, or the maximum number of epochs is reached
-        epoch = 0
         delta = 1
-        while delta > convergence_threshold and epoch < 10000:
-            epoch += 1
+        while delta > convergence_threshold and self.epoch < 10000:
+            self.epoch += 1
             delta = self.value_iteration()
-            console.display(f"Epoch {epoch}: highest delta = {delta}")
+            # console.display(f"Epoch {epoch}: highest delta = {delta}")
 
 
     def initialise_policy(self):
@@ -756,6 +764,7 @@ class MDPPolicyIterationSolver(MazeGame):
         super(MDPPolicyIterationSolver, self).__init__(maze, state, vis_time)
         self.policy = {}
         self.costs = {}
+        self.epoch = 0
 
     def compute_policy(self):
         """
@@ -773,13 +782,12 @@ class MDPPolicyIterationSolver(MazeGame):
 
         # main loop - Policy Evaluation then Policy Improvement
         # run until the policy doesn't change, or the maximum number of epochs is reached
-        epoch = 0
         actions_updated = 1
-        while actions_updated > 0 and epoch < 10000:
-            epoch += 1
+        while actions_updated > 0 and self.epoch < 10000:
+            self.epoch += 1
             self.evaluate_policy()
             actions_updated = self.improve_policy()
-            console.display(f"Epoch {epoch}: Updated {actions_updated} actions.")
+            # console.display(f"Epoch {epoch}: Updated {actions_updated} actions.")
 
 
     def initialise_policy(self):
