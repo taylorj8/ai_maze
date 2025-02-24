@@ -1,10 +1,15 @@
 # -*- coding: utf-8 -*-
+import os.path
 import random
 import time
 import heapq
 import math
 import csv
 import tracemalloc
+import console
+import traceback
+import sys
+import subprocess
 
 
 # Easy to read representation for each cardinal direction.
@@ -312,16 +317,25 @@ class MazeGame(object):
         self.peak_memory = None
         self.move_counter = 0
 
+    def get_results(self):
+        return {
+            "maze": f"{self.maze.width}x{self.maze.height}-{seed}",
+            "algorithm": self.__class__.__name__.replace("Solver", ""),
+            "execution_time (s)": self.timer,
+            "path_length": len(self.path),
+            "peak_memory (kB)": self.peak_memory,
+            "total_moves": self.move_counter
+        }
 
     def generate_maze(self, width, height):
         self.maze = Maze.generate(width, height)
         self.player = self._get_random_position()
         self.target = self._get_random_position()
 
-    def set_maze(self, maze, player, target):
+    def set_maze(self, maze):
         self.maze = maze
-        self.player = player
-        self.target = target
+        self.player = (0, 0)
+        self.target = (maze.width - 1, maze.height - 1)
 
     def _get_random_position(self):
         """
@@ -363,7 +377,7 @@ class MazeGame(object):
         self.timer = time.time()
 
         if self.mode == 'benchmark':
-            console.display("Benchmarking {}...".format(self.__class__.__name__))
+            console.display(f"Benchmarking {self.__class__.__name__} on {self.maze.width}x{self.maze.height} maze...")
 
         tracemalloc.start()
         while self.player != self.target:
@@ -384,6 +398,7 @@ class MazeGame(object):
                 self.player = (self.player[0] + x, self.player[1] + y)
         _, self.peak_memory = tracemalloc.get_traced_memory()
         tracemalloc.stop()
+        self.peak_memory = self.peak_memory / 3**10 # convert to kB
 
         self.timer = time.time() - self.timer
         self.replay()
@@ -393,12 +408,13 @@ class MazeGame(object):
         else:
             unique_metric = f"Unique cells visited: {len([cell for cell in self.maze.cells if cell.visited])}\n"
         # moves_str = ", ".join([f"({cell.x}, {cell.y})" for cell in self.path])
-        console.display(f"{self.__class__.__name__} took {self.timer:.5f} seconds.\n"
-                        f"Shortest path found was {len(self.path) - 1} moves.\n" + unique_metric +
-                        f"Peak memory usage: {self.peak_memory / 10**3:.3f} KB.")
-        console.get_key()
+
+        if '-l' not in args:
+            console.display(f"{self.__class__.__name__} took {self.timer:.5f} seconds.\n"
+                            f"Shortest path found was {len(self.path) - 1} moves.\n" + unique_metric +
+                            f"Peak memory usage: {self.peak_memory:.3f} KB.")
+            console.get_key()
         maze.reset()
-        return self.timer
 
     def choose_move(self):
         key = console.get_valid_key(['up', 'down', 'left', 'right', 'q'])
@@ -649,6 +665,15 @@ class MDPValueIterationSolver(MazeGame):
         self.policy = {} # dictionary mapping each cell to its best action (one of: 'up', 'down', 'left', 'right')
         self.epoch = 0
 
+    def get_results(self):
+        return {
+            "maze": f"{self.maze.width}x{self.maze.height}-{seed}",
+            "algorithm": self.__class__.__name__.replace("Solver", ""),
+            "execution_time (s)": self.timer,
+            "path_length": len(self.path),
+            "peak_memory (kB)": self.peak_memory,
+            "epochs": self.epoch
+        }
 
     def compute_policy(self):
         """
@@ -766,6 +791,16 @@ class MDPPolicyIterationSolver(MazeGame):
         self.costs = {}
         self.epoch = 0
 
+    def get_results(self):
+        return {
+            "maze": f"{self.maze.width}x{self.maze.height}-{seed}",
+            "algorithm": self.__class__.__name__.replace("Solver", ""),
+            "execution_time (s)": self.timer,
+            "path_length": len(self.path),
+            "peak_memory (kB)": self.peak_memory,
+            "epochs": self.epoch
+        }
+
     def compute_policy(self):
         """
         Compute the optimal policy using Policy Iteration.
@@ -878,24 +913,29 @@ class MDPPolicyIterationSolver(MazeGame):
 
 
 def append_to_csv(results, csv_file_path='results.csv'):
-    """
-    Appends the timing results of an algorithm run to a CSV file.
+    file_exists = os.path.exists(csv_file_path)
+    with open(csv_file_path, 'a', newline='') as csv_file:
+        field_names = ["maze", "algorithm", "execution_time (s)", "peak_memory (kB)", "path_length", "total_moves", "epochs"]
+        writer = csv.DictWriter(csv_file, fieldnames=field_names)
 
-    Parameters:
-    algorithm_name (str): The name of the algorithm.
-    time_taken (float): The time taken by the algorithm.
-    csv_file_path (str): The path to the CSV file.
-    """
-    with open(csv_file_path, mode='a', newline='') as file:
-        writer = csv.writer(file)
+        if not file_exists:
+            writer.writeheader()  # Write the column headers
         writer.writerow(results)
 
 
 if __name__ == '__main__':
-    import sys
     solvers = []
-    if len(sys.argv) > 1:
-        args = sys.argv[1:]
+    args = sys.argv
+
+    if args[1] == '-benchmark':
+        for i in range(10, 101, 10):
+            maze_size = str(i)
+            subprocess.run(["python", "maze.py", "-s", "all", "-w", maze_size, "-h", maze_size, "-b", "-l"])
+        console.display("Benchmarking complete. Results saved to results.csv.")
+        console.get_key()
+        exit()
+
+    if len(args) > 1:
         try:
             if '-w' in args:
                 width = int(args[args.index('-w') + 1])
@@ -937,24 +977,19 @@ if __name__ == '__main__':
         width = 20
         height = 10
 
+    # set the random seed for reproducibility
+    seed = random.randint(0, 1000000)
+    random.seed(seed)
+
     # give all solvers the same maze
     maze = Maze.generate(width, height)
-    # player = maze.get_random_position()
-    # target = maze.get_random_position()
-    player = (0, 0)
-    target = (width - 1, height - 1)
     for solver in solvers:
-        solver.set_maze(maze, player, target)
+        solver.set_maze(maze)
 
-    results = []
-
-    import console
     try:
         for solver in solvers:
-            time_taken = solver.play()
-            results.append(time_taken)
+            solver.play()
+            if '-l' in args:
+                append_to_csv(solver.get_results())
     except:
-        import traceback
         traceback.print_exc(file=open('error_log.txt', 'a'))
-
-    append_to_csv(results)
